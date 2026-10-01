@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cocina con Ace</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
+  body { font-family:'Segoe UI',sans-serif; background:#2d1b1b; color:#fff; overflow:hidden; height:100vh; display:flex; flex-direction:column; align-items:center; }
+  #hud { width:100%; max-width:600px; padding:10px; display:flex; justify-content:space-between; background:#3a2424; font-size:16px; }
+  #game { position:relative; width:100%; max-width:600px; height:70vh; background:#4a2f2f; border-radius:12px; margin-top:8px; overflow:hidden; }
+  #receta { position:absolute; top:8px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.6); padding:6px 14px; border-radius:20px; font-size:15px; z-index:5; }
+  #olla { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); width:130px; height:90px; background:#333; border-radius:0 0 40px 40px; border:4px solid #555; display:flex; align-items:center; justify-content:center; font-size:40px; }
+  .ingrediente { position:absolute; width:60px; height:60px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:32px; cursor:grab; box-shadow:0 4px 8px rgba(0,0,0,.4); transition:transform .1s; z-index:3; }
+  .ingrediente.drag { transform:scale(1.2); z-index:10; cursor:grabbing; }
+  #msg { position:absolute; top:45%; left:50%; transform:translate(-50%,-50%); font-size:22px; font-weight:bold; text-shadow:0 2px 4px #000; z-index:20; pointer-events:none; opacity:0; transition:opacity .3s; }
+  #overlay { position:absolute; inset:0; background:rgba(0,0,0,.85); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:50; text-align:center; padding:20px; }
+  #overlay button { margin-top:16px; padding:12px 30px; font-size:18px; border:none; border-radius:8px; cursor:pointer; background:#e74c3c; color:#fff; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <span>Nivel: <b id="nivel">1</b></span>
+  <span>Combo: <b id="combo">x1</b></span>
+  <span>Vidas: <b id="vidas">3</b></span>
+  <span>⏱ <b id="tiempo">45</b></span>
+</div>
+<div id="game">
+  <div id="receta">Necesitas: <b id="recetaTexto">🍎</b></div>
+  <div id="olla">🍲</div>
+  <div id="msg"></div>
+  <div id="overlay">
+    <h2 id="overlayTitulo"></h2>
+    <p id="overlayTexto"></p>
+    <button onclick="reiniciar()">Reiniciar</button>
+  </div>
+</div>
+
+<script>
+const NIVELES = [
+  { nombre:"Entrante", receta:["🍎","🍌","🍓"], tiempo:45, trampas:1 },
+  { nombre:"Plato principal", receta:["🍎","🍌","🍓","🍒","🍊"], tiempo:40, trampas:2 },
+  { nombre:"Postre", receta:["🍎","🍌","🍓","🍒","🍊","🍇","🍑"], tiempo:35, trampas:3 }
+];
+let nivel=0, vidas=3, tiempo, combo=1, aciertos=0, timer, ingredientes=[];
+const game=document.getElementById('game'), olla=document.getElementById('olla');
+const recetaTxt=document.getElementById('recetaTexto'), msg=document.getElementById('msg');
+
+function mostrarMensaje(t,ok){
+  msg.textContent=t; msg.style.color=ok?'#2ecc71':'#e74c3c'; msg.style.opacity=1;
+  setTimeout(()=>msg.style.opacity=0,900);
+}
+function crearIngrediente(esCorrecto){
+  const d=document.createElement('div');
+  const todos=["🍎","🍌","🍓","🍒","🍊","🍇","🍑","🥕","🥦","🧅"];
+  let icono;
+  if(esCorrecto) icono=NIVELES[nivel].receta[aciertos];
+  else{ do{ icono=todos[Math.floor(Math.random()*todos.length)]; }while(NIVELES[nivel].receta.includes(icono)); }
+  d.className='ingrediente'; d.textContent=icono;
+  d.style.left=(10+Math.random()*70)+'%'; d.style.top=(15+Math.random()*55)+'%';
+  d.dataset.correcto=esCorrecto;
+  game.appendChild(d); ingredientes.push(d);
+  arrastrar(d);
+}
+function arrastrar(el){
+  let sx,sy,ex,ey,arrastrando=false;
+  const iniciar=(x,y)=>{ sx=x; sy=y; arrastrando=true; el.classList.add('drag'); };
+  const mover=(x,y)=>{ if(!arrastrando)return; ex=x; ey=y; el.style.left=(el.offsetLeft+ex-sx)+'px'; el.style.top=(el.offsetTop+ey-sy)+'px'; sx=x; sy=y; };
+  const soltar=()=>{
+    if(!arrastrando)return; arrastrando=false; el.classList.remove('drag');
+    const r=olla.getBoundingClientRect(), e=el.getBoundingClientRect();
+    const cx=e.left+e.width/2, cy=e.top+e.height/2;
+    const dentro=cx>r.left&&cx<r.right&&cy>r.top&&cy<r.bottom;
+    if(dentro){
+      if(el.dataset.correcto==='true'){
+        aciertos++; combo++;
+        document.getElementById('combo').textContent='x'+combo;
+        el.remove();
+        mostrarMensaje('¡Perfecto! +'+(10*combo)+' pts',true);
+        if(aciertos>=NIVELES[nivel].receta.length) siguienteNivel();
+        else recetaTxt.textContent=NIVELES[nivel].receta[aciertos];
+      }else{
+        vidas--; combo=1; document.getElementById('combo').textContent='x1';
+        document.getElementById('vidas').textContent=vidas;
+        mostrarMensaje('¡Ese no es! -1 vida',false);
+        if(vidas<=0) fin(false);
+      }
+    }
+  };
+  el.addEventListener('mousedown',e=>iniciar(e.clientX,e.clientY));
+  document.addEventListener('mousemove',e=>mover(e.clientX,e.clientY));
+  document.addEventListener('mouseup',soltar);
+  el.addEventListener('touchstart',e=>{const t=e.touches[0];iniciar(t.clientX,t.clientY);},{passive:true});
+  document.addEventListener('touchmove',e=>{const t=e.touches[0];mover(t.clientX,t.clientY);},{passive:true});
+  document.addEventListener('touchend',soltar);
+}
+function siguienteNivel(){
+  clearInterval(timer);
+  if(nivel>=NIVELES.length-1){ fin(true); return; }
+  nivel++; aciertos=0; combo=1;
+  document.getElementById('nivel').textContent=nivel+1;
+  document.getElementById('combo').textContent='x1';
+  recetaTxt.textContent=NIVELES[nivel].receta[0];
+  iniciarNivel();
+}
+function iniciarNivel(){
+  ingredientes.forEach(i=>i.remove()); ingredientes=[];
+  tiempo=NIVELES[nivel].tiempo; document.getElementById('tiempo').textContent=tiempo;
+  for(let i=0;i<NIVELES[nivel].receta.length+NIVELES[nivel].trampas;i++){
+    setTimeout(()=>{
+      if(ingredientes.length<8) crearIngrediente(i<NIVELES[nivel].receta.length);
+    }, i*400);
+  }
+  timer=setInterval(()=>{
+    tiempo--; document.getElementById('tiempo').textContent=tiempo;
+    if(tiempo<=0) fin(false);
+  },1000);
+}
+function fin(ganado){
+  clearInterval(timer);
+  document.getElementById('overlay').style.display='flex';
+  document.getElementById('overlayTitulo').textContent=ganado?'🎉 ¡Cena perfecta!':'🔥 Se te quemó todo';
+  document.getElementById('overlayTexto').textContent=ganado?'Ace quedó impresionado. +2 afinidad':'Ace suspiró. -1 afinidad';
+}
+function reiniciar(){
+  nivel=0; vidas=3; aciertos=0; combo=1;
+  document.getElementById('vidas').textContent=3; document.getElementById('nivel').textContent=1;
+  document.getElementById('overlay').style.display='none';
+  recetaTxt.textContent=NIVELES[0].receta[0];
+  iniciarNivel();
+}
+iniciarNivel();
+</script>
+</body>
+</html>
